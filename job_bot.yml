@@ -1,0 +1,43 @@
+name: Oman Jobs AI Bot Scheduler
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Cache Database
+      uses: actions/cache@v3
+      with:
+        path: database/jobs.db
+        key: ${{ runner.os }}-jobs-db-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-jobs-db-
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Job Bot
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
+        FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+        INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+        LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+        LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
+      run: |
+        python main.py
