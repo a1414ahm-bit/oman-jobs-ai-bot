@@ -1,60 +1,63 @@
 import requests
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+import urllib.parse
 
 TARGET_COUNTRIES = [
-    {"name": "سلطنة عمان", "query": "عمان"},
-    {"name": "السعودية", "query": "السعودية"},
-    {"name": "الإمارات", "query": "الإمارات"},
-    {"name": "قطر", "query": "قطر"},
-    {"name": "الكويت", "query": "الكويت"},
-    {"name": "البحرين", "query": "البحرين"},
-    {"name": "مصر", "query": "مصر"}
+    {"name": "سلطنة عمان", "query": "وظائف شاغرة سلطنة عمان"},
+    {"name": "السعودية", "query": "وظائف شاغرة السعودية"},
+    {"name": "الإمارات", "query": "وظائف شاغرة الإمارات"},
+    {"name": "قطر", "query": "وظائف شاغرة قطر"},
+    {"name": "الكويت", "query": "وظائف شاغرة الكويت"},
+    {"name": "البحرين", "query": "وظائف شاغرة البحرين"},
+    {"name": "مصر", "query": "وظائف شاغرة مصر"}
 ]
 
-def fetch_real_jobs(country_info):
+def fetch_rss_jobs(country_info):
     country_name = country_info["name"]
     query = country_info["query"]
     
-    # محرك بحث مباشر للفرص الوظيفية المنشورة حديثاً
-    url = f"https://html.duckduckgo.com/html/?q=وظائف+شاغرة+{query}+تحديث+اليوم"
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ar&gl=EG&ceid=EG:ar"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
     jobs = []
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            results = soup.find_all('a', class_='result__url', limit=3)
-            titles = soup.find_all('a', class_='result__snippet', limit=3)
+            root = ET.fromstring(response.content)
+            items = root.findall('.//item')[:2]  # جلب أحدث وظيفتين من كل دولة
             
-            for index, res in enumerate(results):
-                link = res.get('href', '')
-                title_text = titles[index].text if index < len(titles) else f"فرصة عمل جديدة في {country_name}"
+            for item in items:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
                 
-                # تنظيف وتنسيق العنوان
-                clean_title = title_text.replace("\n", "").strip()[:80]
+                title = title_elem.text if title_elem is not None else "وظيفة شاغرة جديدة"
+                link = link_elem.text if link_elem is not None else "https://google.com"
+                
+                clean_title = title.split(" - ")[0]
                 
                 jobs.append({
-                    "title": f"وظيفة شاغرة: {clean_title}",
-                    "company": "إعلان توظيف حديث",
+                    "title": clean_title,
+                    "company": "جهة غير محددة",
                     "country": country_name,
                     "location": country_name,
-                    "description": f"تم رصد فرصة عمل جديدة في {country_name}. يمكنك التقديم والاطلاع على التفاصيل عبر الرابط المرفق.",
-                    "link": link if link.startswith('http') else f"https://{link}"
+                    "description": f"فرصة عمل جديدة تم رصدها حديثاً في {country_name}. اضغط على الرابط للتفاصيل والتقديم.",
+                    "link": link
                 })
     except Exception as e:
-        print(f"[-] خطأ أثناء البحث عن وظائف {country_name}: {e}")
+        print(f"[-] خطأ في جلب وظائف {country_name}: {e}")
         
     return jobs
 
 def collect_all_jobs():
     all_jobs = []
-    print("[+] بدء المسح الشامل للإنترنت لجلب أحدث إعلانات الوظائف للخليج ومصر...")
+    print("[+] بدء المسح الشامل لجلب أحدث إعلانات الوظائف للخليج ومصر...")
     
     for country in TARGET_COUNTRIES:
-        country_jobs = fetch_real_jobs(country)
+        country_jobs = fetch_rss_jobs(country)
         all_jobs.extend(country_jobs)
         
     print(f"[+] إجمالي الوظائف المجمعة من الشبكة: {len(all_jobs)}")
