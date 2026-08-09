@@ -5,14 +5,44 @@ import urllib.parse
 import feedparser
 from PIL import Image, ImageDraw, ImageFont
 import requests
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 # --- 1. الإعدادات والمفاتيح ---
 FACEBOOK_PAGE_ID = os.environ.get("FACEBOOK_PAGE_ID")
 FACEBOOK_ACCESS_TOKEN = os.environ.get("FACEBOOK_ACCESS_TOKEN")
 CACHE_FILE = "published_jobs.json"
+FONT_PATH = "Amiri-Bold.ttf"
 
 
-# --- 2. إدارة قاعدة البيانات المؤقتة ---
+# --- 2. اختصار الروابط الطويلة ---
+def shorten_url(long_url):
+    try:
+        api_url = f"http://tinyurl.com/api-create.php?url={urllib.parse.quote(long_url)}"
+        res = requests.get(api_url, timeout=10)
+        if res.status_code == 200:
+            return res.text.strip()
+    except Exception as e:
+        print(f"[!] فشل اختصار الرابط: {e}")
+    return long_url
+
+
+# --- 3. تحميل خط عربي تلقائياً ---
+def download_arabic_font():
+    if not os.path.exists(FONT_PATH):
+        print("[+] جاري تحميل الخط العربي...")
+        font_url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
+        res = requests.get(font_url)
+        with open(FONT_PATH, "wb") as f:
+            f.write(res.content)
+
+
+def reshape_text(text):
+    reshaped = arabic_reshaper.reshape(text)
+    return get_display(reshaped)
+
+
+# --- 4. إدارة قاعدة البيانات المؤقتة ---
 def load_published_jobs():
     if os.path.exists(CACHE_FILE):
         try:
@@ -28,7 +58,7 @@ def save_published_jobs(published_set):
         json.dump(list(published_set), f, ensure_ascii=False, indent=2)
 
 
-# --- 3. التصنيف الذكي للتخصصات ---
+# --- 5. التصنيف الذكي للتخصصات ---
 def categorize_job(title):
     title_lower = title.lower()
     if any(
@@ -68,37 +98,78 @@ def categorize_job(title):
         return "وظائف عامة", "💼"
 
 
-# --- 4. توليد تصميم صورة إعلانية مع خط آمن ---
+# --- 6. توليد صورة احترافية باللغة العربية ---
 def generate_job_image(title, category, country):
+    download_arabic_font()
+
     img = Image.new("RGB", (1080, 1080), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
-    font = ImageFont.load_default()
+
+    title_font = ImageFont.truetype(FONT_PATH, 50)
+    header_font = ImageFont.truetype(FONT_PATH, 60)
+    sub_font = ImageFont.truetype(FONT_PATH, 40)
 
     draw.rectangle([40, 40, 1040, 1040], outline=(56, 189, 248), width=8)
 
+    # كتابة النصوص العربية المنسقة
     draw.text(
-        (80, 100), "FORSA | منصة فرصة", fill=(255, 255, 255), font=font
+        (540, 120),
+        reshape_text("منصة فرصة | FORSA"),
+        fill=(255, 255, 255),
+        font=header_font,
+        anchor="mm",
     )
     draw.text(
-        (80, 180), f"Country: {country}", fill=(56, 189, 248), font=font
+        (540, 220),
+        reshape_text(f"الدولة: {country}"),
+        fill=(56, 189, 248),
+        font=sub_font,
+        anchor="mm",
     )
     draw.text(
-        (80, 250), f"Category: {category}", fill=(226, 232, 240), font=font
+        (540, 300),
+        reshape_text(f"التصنيف: {category}"),
+        fill=(226, 232, 240),
+        font=sub_font,
+        anchor="mm",
     )
 
+    # تقسيم عنوان الوظيفة لسلسلة أسطر
     words = title.split()
     line1 = " ".join(words[:6])
     line2 = " ".join(words[6:12])
-
-    draw.text((80, 420), line1, fill=(255, 255, 255), font=font)
-    if line2:
-        draw.text((80, 500), line2, fill=(255, 255, 255), font=font)
+    line3 = " ".join(words[12:])
 
     draw.text(
-        (80, 880),
-        "Details inside the post",
+        (540, 480),
+        reshape_text(line1),
+        fill=(255, 255, 255),
+        font=title_font,
+        anchor="mm",
+    )
+    if line2:
+        draw.text(
+            (540, 560),
+            reshape_text(line2),
+            fill=(255, 255, 255),
+            font=title_font,
+            anchor="mm",
+        )
+    if line3:
+        draw.text(
+            (540, 640),
+            reshape_text(line3),
+            fill=(255, 255, 255),
+            font=title_font,
+            anchor="mm",
+        )
+
+    draw.text(
+        (540, 920),
+        reshape_text("التفاصيل ورابط التقديم داخل المنشور"),
         fill=(148, 163, 184),
-        font=font,
+        font=sub_font,
+        anchor="mm",
     )
 
     img_bytes = io.BytesIO()
@@ -107,7 +178,7 @@ def generate_job_image(title, category, country):
     return img_bytes
 
 
-# --- 5. جلب الوظائف مع ترميز الروابط لتفادي خطأ المسافات ---
+# --- 7. جلب الوظائف ---
 def fetch_jobs():
     sources = [
         {"q": "وظائف", "country": "مصر", "flag": "🇪🇬"},
@@ -137,7 +208,7 @@ def fetch_jobs():
     return all_jobs
 
 
-# --- 6. النشر المباشر على فيسبوك ---
+# --- 8. النشر المباشر ---
 def post_photo_to_facebook(message, image_bytes):
     if not FACEBOOK_PAGE_ID or not FACEBOOK_ACCESS_TOKEN:
         print("[!] لم يتم ضبط المفاتيح في Secrets.")
@@ -156,7 +227,7 @@ def post_photo_to_facebook(message, image_bytes):
         return False
 
 
-# --- 7. التشغيل الرئيسي ---
+# --- 9. التشغيل الرئيسي ---
 def main():
     print("=== بدء تشغيل بوت منصة فرصة ===")
     published_jobs = load_published_jobs()
@@ -170,19 +241,21 @@ def main():
         return
 
     job = new_jobs[0]
+    short_link = shorten_url(job["link"])
+
+    # تنظيف العنوان من علامات النجمتين لتنسيق أنظف
+    clean_title = job["title"].replace("**", "")
 
     post_text = (
         f"{job['flag']} {job['country']} | {job['cat_icon']} {job['category']}\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📌 **الوظيفة:** {job['title']}\n\n"
-        f"🔗 **رابط التقديم والتفاصيل:**\n{job['link']}\n\n"
+        f"📌 الوظيفة: {clean_title}\n\n"
+        f"🔗 رابط التقديم والتفاصيل:\n{short_link}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"#منصة_فرصة #وظائف_{job['country'].replace(' ', '_')} #{job['category'].replace(' ', '_')} #توظيف"
     )
 
-    img_bytes = generate_job_image(
-        job["title"], job["category"], job["country"]
-    )
+    img_bytes = generate_job_image(clean_title, job["category"], job["country"])
 
     if post_photo_to_facebook(post_text, img_bytes):
         published_jobs.add(job["id"])
