@@ -1,21 +1,27 @@
-import io
 import json
 import os
 import urllib.parse
-import arabic_reshaper
-from bidi.algorithm import get_display
 import feedparser
-from PIL import Image, ImageDraw, ImageFont
+import google.generativeai as genai
 import requests
 
-# --- 1. الإعدادات والمفاتيح ---
+# ================= =================
+# 1. إعدادات البيئة والمفاتيح
+# ================= =================
 FACEBOOK_PAGE_ID = os.environ.get("FACEBOOK_PAGE_ID")
 FACEBOOK_ACCESS_TOKEN = os.environ.get("FACEBOOK_ACCESS_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # مفتاح Gemini AI
+
 CACHE_FILE = "published_jobs.json"
-FONT_PATH = "Amiri-Bold.ttf"
+
+# تهيئة الذكاء الاصطناعي
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 
-# --- 2. اختصار الروابط الطويلة ---
+# ================= =================
+# 2. اختصار الروابط
+# ================= =================
 def shorten_url(long_url):
     try:
         api_url = f"http://tinyurl.com/api-create.php?url={urllib.parse.quote(long_url)}"
@@ -23,26 +29,13 @@ def shorten_url(long_url):
         if res.status_code == 200:
             return res.text.strip()
     except Exception as e:
-        print(f"[!] فشل اختصار الرابط: {e}")
+        print(f"[!] تعذر اختصار الرابط: {e}")
     return long_url
 
 
-# --- 3. تحميل الخط العربي وتصحيح الاتجاه ---
-def download_arabic_font():
-    if not os.path.exists(FONT_PATH):
-        print("[+] جاري تحميل الخط العربي...")
-        font_url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
-        res = requests.get(font_url)
-        with open(FONT_PATH, "wb") as f:
-            f.write(res.content)
-
-
-def reshape_text(text):
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
-
-
-# --- 4. إدارة قاعدة البيانات المؤقتة ---
+# ================= =================
+# 3. إدارة قواعد البيانات وقمع التكرار
+# ================= =================
 def load_published_jobs():
     if os.path.exists(CACHE_FILE):
         try:
@@ -53,211 +46,138 @@ def load_published_jobs():
     return set()
 
 
-def save_published_jobs(published_set):
+def save_published_job(job_id):
+    jobs = load_published_jobs()
+    jobs.add(job_id)
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(published_set), f, ensure_ascii=False, indent=2)
+        json.dump(list(jobs), f, ensure_ascii=False, indent=2)
 
 
-# --- 5. التصنيف الذكي للتخصصات ---
-def categorize_job(title):
-    title_lower = title.lower()
-    if any(
-        w in title_lower
-        for w in [
-            "برمجة",
-            "تطوير",
-            "python",
-            "developer",
-            "مهندس",
-            "it",
-            "تقنية",
-        ]
-    ):
-        return "تكنولوجيا وهندسة", "💻"
-    elif any(
-        w in title_lower
-        for w in ["تسويق", "مبيعات", "ارباح", "ماركتنج", "sales", "علاقات"]
-    ):
-        return "تسويق ومبيعات", "📈"
-    elif any(
-        w in title_lower
-        for w in ["محاسب", "مالية", "بنك", "finance", "accounting", "تدقيق"]
-    ):
-        return "مالية ومحاسبة", "💰"
-    elif any(
-        w in title_lower
-        for w in ["طبيب", "تمريض", "صيدلي", "مستشفى", "medical", "صحة"]
-    ):
-        return "طب ورعاية صحية", "🏥"
-    elif any(
-        w in title_lower
-        for w in ["معلم", "تدريس", "مدرس", "جامعة", "أستاذ", "تعليم"]
-    ):
-        return "تعليم وتدريب", "🎓"
-    else:
-        return "وظائف عامة", "💼"
-
-
-# --- 6. توليد صورة احترافية باللغة العربية ---
-def generate_job_image(title, category, country):
-    download_arabic_font()
-
-    img = Image.new("RGB", (1080, 1080), color=(15, 23, 42))
-    draw = ImageDraw.Draw(img)
-
-    title_font = ImageFont.truetype(FONT_PATH, 42)
-    header_font = ImageFont.truetype(FONT_PATH, 55)
-    sub_font = ImageFont.truetype(FONT_PATH, 35)
-
-    # إطار أزرق أنيق
-    draw.rectangle([40, 40, 1040, 1040], outline=(56, 189, 248), width=8)
-
-    # كتابة النصوص محاذاة من اليمين
-    draw.text(
-        (980, 100),
-        reshape_text("منصة فرصة | FORSA"),
-        fill=(255, 255, 255),
-        font=header_font,
-        anchor="ra",
-    )
-    draw.text(
-        (980, 200),
-        reshape_text(f"الدولة: {country}"),
-        fill=(56, 189, 248),
-        font=sub_font,
-        anchor="ra",
-    )
-    draw.text(
-        (980, 270),
-        reshape_text(f"التصنيف: {category}"),
-        fill=(226, 232, 240),
-        font=sub_font,
-        anchor="ra",
-    )
-
-    # خط فاصل
-    draw.line([(100, 350), (980, 350)], fill=(56, 189, 248), width=3)
-
-    # تقسيم عنوان الوظيفة لأسطر متناسقة
-    words = title.split()
-    lines = []
-    current_line = []
-    for word in words:
-        current_line.append(word)
-        if len(" ".join(current_line)) > 30:
-            lines.append(" ".join(current_line[:-1]))
-            current_line = [word]
-    if current_line:
-        lines.append(" ".join(current_line))
-
-    # رسم الأسطر
-    y_pos = 430
-    for line in lines[:4]:
-        draw.text(
-            (980, y_pos),
-            reshape_text(line),
-            fill=(255, 255, 255),
-            font=title_font,
-            anchor="ra",
-        )
-        y_pos += 80
-
-    # التذييل السفلي
-    draw.text(
-        (980, 920),
-        reshape_text("التفاصيل ورابط التقديم داخل المنشور 🔗"),
-        fill=(148, 163, 184),
-        font=sub_font,
-        anchor="ra",
-    )
-
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format="PNG")
-    img_bytes.seek(0)
-    return img_bytes
-
-
-# --- 7. جلب الوظائف ---
-def fetch_jobs():
-    sources = [
-        {"q": "وظائف", "country": "مصر", "flag": "🇪🇬"},
-        {"q": "وظائف", "country": "سلطنة عمان", "flag": "🇴🇲"},
-        {"q": "وظائف", "country": "السعودية", "flag": "🇸🇦"},
-        {"q": "وظائف", "country": "الإمارات", "flag": "🇦🇪"},
+# ================= =================
+# 4. البحث المتقدم عن الوظائف الحقيقية
+# ================= =================
+def fetch_realtime_jobs():
+    search_queries = [
+        "مطلوب موظفين حديث",
+        "وظائف خالية اليوم",
+        "تعلن شركة عن حاجتها",
     ]
-    all_jobs = []
-    for src in sources:
-        query_str = urllib.parse.quote(f"{src['q']} {src['country']}")
-        url = f"https://news.google.com/rss/search?q={query_str}&hl=ar&gl=EG&ceid=EG:ar"
+    countries = ["مصر", "السعودية", "الإمارات", "عمان"]
 
-        feed = feedparser.parse(url)
-        for entry in feed.entries[:3]:
-            category, cat_icon = categorize_job(entry.title)
-            all_jobs.append(
-                {
-                    "id": entry.link,
-                    "title": entry.title,
-                    "link": entry.link,
-                    "country": src["country"],
-                    "flag": src["flag"],
-                    "category": category,
-                    "cat_icon": cat_icon,
-                }
-            )
-    return all_jobs
+    found_jobs = []
+
+    for country in countries:
+        for q in search_queries:
+            query = f'"{q}" {country}'
+            encoded_query = urllib.parse.quote(query)
+            # جلب النتائج اللحظية الحقيقية المرتبة حسب الأحدث
+            rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ar&gl=EG&ceid=EG:ar"
+
+            feed = feedparser.parse(rss_url)
+            for entry in feed.entries[:2]:
+                found_jobs.append(
+                    {
+                        "id": entry.link,
+                        "title": entry.title,
+                        "link": entry.link,
+                        "country": country,
+                        "summary": getattr(entry, "summary", entry.title),
+                    }
+                )
+    return found_jobs
 
 
-# --- 8. النشر المباشر ---
-def post_photo_to_facebook(message, image_bytes):
+# ================= =================
+# 5. صياغة البوست بالذكاء الاصطناعي (Gemini)
+# ================= =================
+def generate_ai_post(job_data):
+    if not GEMINI_API_KEY:
+        # صياغة احتياطية في حال عدم توفر مفتاح AI
+        short_link = shorten_url(job_data["link"])
+        return (
+            f"📢 فرصة عمل جديدة في {job_data['country']}\n\n"
+            f"📌 {job_data['title']}\n\n"
+            f"🔗 للتفاصيل والتقديم:\n{short_link}\n\n"
+            f"#منصة_فرصة #وظائف_{job_data['country']}"
+        )
+
+    model = genai.GenerativeModel("gemini-pro")
+
+    short_link = shorten_url(job_data["link"])
+
+    prompt = f"""
+    أنت مدير محتوى لمشروع "منصة فرصة" المتخصص في نشر الوظائف.
+    قم بكتابة منشور فيسبوك احترافي وبشري للغاية (كأنك خبير توظيف تكتبه بنفسك) بناءً على بيانات الوظيفة التالية:
+    - عنوان الوظيفة: {job_data['title']}
+    - الدولة: {job_data['country']}
+    - تفاصيل إضافية: {job_data['summary']}
+    
+    التعليمات:
+    1. ابدأ بأسلوب مشجع وجذاب وبشري دون رسميات متخشبّة.
+    2. استخدم إيموجيز مناسبة وأنيقة بدون مبالغة.
+    3. قسم المنشور إلى نقاط واضحة (المسمى الوظيفي، الدولة، التفاصيل).
+    4. أدرج هذا الرابط المختصر للتقديم بشكل واضح جداً: {short_link}
+    5. أضف هاشتاجات نشطة ومناسبة مثل #منصة_فرصة وهاشتاج الدولة والتخصص.
+    6. لا تذكر أي معلومات وهمية لم تذكر في البيانات.
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"[!] خطأ في توليد الذكاء الاصطناعي: {e}")
+        return f"📢 {job_data['title']}\n\n🔗 التقديم: {short_link}\n\n#منصة_فرصة"
+
+
+# ================= =================
+# 6. النشر المباشر على فيسبوك
+# ================= =================
+def post_to_facebook(post_text):
     if not FACEBOOK_PAGE_ID or not FACEBOOK_ACCESS_TOKEN:
-        print("[!] لم يتم ضبط المفاتيح في Secrets.")
+        print("[!] خطأ: لم يتم ضبط بيانات فيسبوك (Secrets).")
         return False
 
-    url = f"https://graph.facebook.com/v26.0/{FACEBOOK_PAGE_ID}/photos"
-    payload = {"message": message, "access_token": FACEBOOK_ACCESS_TOKEN}
-    files = {"source": ("job_image.png", image_bytes, "image/png")}
+    url = f"https://graph.facebook.com/v26.0/{FACEBOOK_PAGE_ID}/feed"
+    payload = {"message": post_text, "access_token": FACEBOOK_ACCESS_TOKEN}
 
-    response = requests.post(url, data=payload, files=files)
-    if response.status_code == 200:
-        print("[+] تم النشر بنجاح على منصة فرصة!")
+    res = requests.post(url, data=payload)
+    if res.status_code == 200:
+        print("[+] تم النشر بنجاح بواسطة الذكاء الاصطناعي على منصة فرصة!")
         return True
     else:
-        print(f"[!] فشل النشر: {response.status_code} - {response.text}")
+        print(f"[!] فشل النشر: {res.status_code} - {res.text}")
         return False
 
 
-# --- 9. التشغيل الرئيسي ---
+# ================= =================
+# 7. التشغيل الرئيسي
+# ================= =================
 def main():
-    print("=== بدء تشغيل بوت منصة فرصة ===")
+    print("=== تشغيل بوت منصة فرصة الذكي ===")
     published_jobs = load_published_jobs()
-    collected_jobs = fetch_jobs()
 
-    new_jobs = [j for j in collected_jobs if j["id"] not in published_jobs]
-    print(f"[+] عدد الوظائف الجديدة: {len(new_jobs)}")
+    # 1. البحث عن الوظائف
+    raw_jobs = fetch_realtime_jobs()
+
+    # 2. ترشيح الوظائف غير المكررة
+    new_jobs = [j for j in raw_jobs if j["id"] not in published_jobs]
+    print(f"[+] تم العثور على {len(new_jobs)} وظيفة جديدة.")
 
     if not new_jobs:
-        print("=== لا توجد وظائف جديدة للنشر حالياً ===")
+        print("=== لا توجد وظائف جديدة غير مكررة حالياً ===")
         return
 
-    job = new_jobs[0]
-    short_link = shorten_url(job["link"])
-    clean_title = job["title"].replace("**", "")
+    # 3. اختيار أول وظيفة جديدة
+    selected_job = new_jobs[0]
 
-    post_text = (
-        f"{job['flag']} {job['country']} | {job['cat_icon']} {job['category']}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📌 الوظيفة: {clean_title}\n\n"
-        f"🔗 رابط التقديم والتفاصيل:\n{short_link}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"#منصة_فرصة #وظائف_{job['country'].replace(' ', '_')} #{job['category'].replace(' ', '_')} #توظيف"
-    )
+    # 4. صياغة المنشور بالذكاء الاصطناعي
+    print("[+] جاري صياغة المنشور عبر الذكاء الاصطناعي...")
+    ai_post_content = generate_ai_post(selected_job)
 
-    img_bytes = generate_job_image(clean_title, job["category"], job["country"])
-
-    if post_photo_to_facebook(post_text, img_bytes):
-        published_jobs.add(job["id"])
-        save_published_jobs(published_jobs)
-        print("=== تم النشر وحفظ البيانات بنجاح ===")
+    # 5. النشر وحفظ السجل
+    if post_to_facebook(ai_post_content):
+        save_published_job(selected_job["id"])
+        print("=== تمت العملية بنجاح ===")
 
 
 if __name__ == "__main__":
