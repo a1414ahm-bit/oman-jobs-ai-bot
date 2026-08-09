@@ -2,11 +2,11 @@ import io
 import json
 import os
 import urllib.parse
+import arabic_reshaper
+from bidi.algorithm import get_display
 import feedparser
 from PIL import Image, ImageDraw, ImageFont
 import requests
-import arabic_reshaper
-from bidi.algorithm import get_display
 
 # --- 1. الإعدادات والمفاتيح ---
 FACEBOOK_PAGE_ID = os.environ.get("FACEBOOK_PAGE_ID")
@@ -27,7 +27,7 @@ def shorten_url(long_url):
     return long_url
 
 
-# --- 3. تحميل خط عربي تلقائياً ---
+# --- 3. تحميل الخط العربي وتصحيح الاتجاه ---
 def download_arabic_font():
     if not os.path.exists(FONT_PATH):
         print("[+] جاري تحميل الخط العربي...")
@@ -105,71 +105,70 @@ def generate_job_image(title, category, country):
     img = Image.new("RGB", (1080, 1080), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
 
-    title_font = ImageFont.truetype(FONT_PATH, 50)
-    header_font = ImageFont.truetype(FONT_PATH, 60)
-    sub_font = ImageFont.truetype(FONT_PATH, 40)
+    title_font = ImageFont.truetype(FONT_PATH, 42)
+    header_font = ImageFont.truetype(FONT_PATH, 55)
+    sub_font = ImageFont.truetype(FONT_PATH, 35)
 
+    # إطار أزرق أنيق
     draw.rectangle([40, 40, 1040, 1040], outline=(56, 189, 248), width=8)
 
-    # كتابة النصوص العربية المنسقة
+    # كتابة النصوص محاذاة من اليمين
     draw.text(
-        (540, 120),
+        (980, 100),
         reshape_text("منصة فرصة | FORSA"),
         fill=(255, 255, 255),
         font=header_font,
-        anchor="mm",
+        anchor="ra",
     )
     draw.text(
-        (540, 220),
+        (980, 200),
         reshape_text(f"الدولة: {country}"),
         fill=(56, 189, 248),
         font=sub_font,
-        anchor="mm",
+        anchor="ra",
     )
     draw.text(
-        (540, 300),
+        (980, 270),
         reshape_text(f"التصنيف: {category}"),
         fill=(226, 232, 240),
         font=sub_font,
-        anchor="mm",
+        anchor="ra",
     )
 
-    # تقسيم عنوان الوظيفة لسلسلة أسطر
+    # خط فاصل
+    draw.line([(100, 350), (980, 350)], fill=(56, 189, 248), width=3)
+
+    # تقسيم عنوان الوظيفة لأسطر متناسقة
     words = title.split()
-    line1 = " ".join(words[:6])
-    line2 = " ".join(words[6:12])
-    line3 = " ".join(words[12:])
+    lines = []
+    current_line = []
+    for word in words:
+        current_line.append(word)
+        if len(" ".join(current_line)) > 30:
+            lines.append(" ".join(current_line[:-1]))
+            current_line = [word]
+    if current_line:
+        lines.append(" ".join(current_line))
 
-    draw.text(
-        (540, 480),
-        reshape_text(line1),
-        fill=(255, 255, 255),
-        font=title_font,
-        anchor="mm",
-    )
-    if line2:
+    # رسم الأسطر
+    y_pos = 430
+    for line in lines[:4]:
         draw.text(
-            (540, 560),
-            reshape_text(line2),
+            (980, y_pos),
+            reshape_text(line),
             fill=(255, 255, 255),
             font=title_font,
-            anchor="mm",
+            anchor="ra",
         )
-    if line3:
-        draw.text(
-            (540, 640),
-            reshape_text(line3),
-            fill=(255, 255, 255),
-            font=title_font,
-            anchor="mm",
-        )
+        y_pos += 80
 
+    # التذييل السفلي
     draw.text(
-        (540, 920),
-        reshape_text("التفاصيل ورابط التقديم داخل المنشور"),
+        (980, 920),
+        reshape_text("التفاصيل ورابط التقديم داخل المنشور 🔗"),
         fill=(148, 163, 184),
         font=sub_font,
-        anchor="mm",
+        anchor="ra",
     )
 
     img_bytes = io.BytesIO()
@@ -242,8 +241,6 @@ def main():
 
     job = new_jobs[0]
     short_link = shorten_url(job["link"])
-
-    # تنظيف العنوان من علامات النجمتين لتنسيق أنظف
     clean_title = job["title"].replace("**", "")
 
     post_text = (
