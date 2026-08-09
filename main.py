@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import urllib.parse
 import feedparser
 from PIL import Image, ImageDraw, ImageFont
 import requests
@@ -76,7 +77,7 @@ def generate_job_image(title, category, country):
     draw.rectangle([40, 40, 1040, 1040], outline=(56, 189, 248), width=8)
 
     draw.text(
-        (80, 100), "منصة فرصة | FORSA", fill=(255, 255, 255), font=font
+        (80, 100), "FORSA | منصة فرصة", fill=(255, 255, 255), font=font
     )
     draw.text(
         (80, 180), f"Country: {country}", fill=(56, 189, 248), font=font
@@ -106,7 +107,7 @@ def generate_job_image(title, category, country):
     return img_bytes
 
 
-# --- 5. جلب الوظائف من مصادر متعددة ---
+# --- 5. جلب الوظائف مع ترميز الروابط لتفادي خطأ المسافات ---
 def fetch_jobs():
     sources = [
         {"q": "وظائف", "country": "مصر", "flag": "🇪🇬"},
@@ -116,7 +117,9 @@ def fetch_jobs():
     ]
     all_jobs = []
     for src in sources:
-        url = f"https://news.google.com/rss/search?q={src['q']}+{src['country']}&hl=ar&gl=EG&ceid=EG:ar"
+        query_str = urllib.parse.quote(f"{src['q']} {src['country']}")
+        url = f"https://news.google.com/rss/search?q={query_str}&hl=ar&gl=EG&ceid=EG:ar"
+
         feed = feedparser.parse(url)
         for entry in feed.entries[:3]:
             category, cat_icon = categorize_job(entry.title)
